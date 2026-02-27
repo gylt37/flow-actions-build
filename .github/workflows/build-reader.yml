@@ -1,4 +1,4 @@
-name: 编译 Flow Reader (多架构)
+name: 编译 Flow Reader
 
 on:
   workflow_dispatch: # 仅手动触发方式
@@ -8,20 +8,11 @@ permissions:
   actions: read
 
 jobs:
-  build-reader:
-    # 仅新增matrix矩阵管理架构，其余逻辑完全保留
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runs-on: ubuntu-22.04
-          - arch: arm64
-            runs-on: ubuntu-22.04-arm
-
-    # 动态绑定运行器，替换原固定的runs-on
-    runs-on: ${{ matrix.runs-on }}
-    name: Build Reader ${{ matrix.arch }}  # 新增架构标识，便于查看
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       # 以下所有步骤完全复制原文件，未做任何修改（包括缓存逻辑）
@@ -83,14 +74,13 @@ jobs:
       - name: 用 tar 打包整个产物目录
         run: |
           # 仅在打包文件名中新增架构标识，避免覆盖，其余打包逻辑不变
-          tar -cpzvf ~/flow-reader-${{ matrix.arch }}.tar.gz -C ~ flow-reader
-          tar -tzf ~/flow-reader-${{ matrix.arch }}.tar.gz | head -10
+          tar -cpzvf ~/flow-reader.tar.gz -C ~ flow-reader
 
       - name: 上传产物到 GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
           # Artifact名称新增架构标识，便于区分
-          name: flow-reader-${{ matrix.arch }}
-          path: ~/flow-reader-${{ matrix.arch }}.tar.gz
+          name: flow-reader
+          path: ~/flow-reader.tar.gz
           retention-days: 2
           if-no-files-found: error
