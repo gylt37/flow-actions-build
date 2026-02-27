@@ -1,0 +1,83 @@
+name: 编译 Docker Flow Reader (多架构)
+
+on:
+  workflow_dispatch:  # 仅手动触发方式
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-and-export:
+    # 矩阵配置：定义不同架构的运行器和pnpm版本
+    strategy:
+      fail-fast: false  # 一个架构失败不影响另一个
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-22.04
+            pnpm-version: ''  # amd64使用默认版本
+          - arch: arm64
+            runs-on: ubuntu-22.04-arm
+            pnpm-version: 10.6.4  # arm64指定版本
+
+    # 动态指定运行器（根据矩阵参数）
+    runs-on: ${{ matrix.runs-on }}
+    # 给job命名，区分架构（便于Actions页面查看）
+    name: Build ${{ matrix.arch }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ matrix.pnpm-version }}  # 动态传入pnpm版本
+          run_install: false
+
+      - name: Set up Node.js 18+
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # 生成.env.local文件（与本地一致）
+      - name: Create .env.local file
+        run: |
+          mkdir -p apps/reader
+          cat > apps/reader/.env.local << EOF
+          NEXT_PUBLIC_DROPBOX_CLIENT_ID=
+          DROPBOX_CLIENT_SECRET=
+          NEXT_PUBLIC_WEBSITE_URL=http://localhost:7117
+          EOF
+
+      # 构建Docker镜像（与本地docker build -t flow .一致）
+      - name: Build Docker image
+        run: docker build -t flow:${{ matrix.arch }} .  # 镜像名带架构标识，避免冲突
+
+      # 验证容器运行（与本地docker run一致）
+      - name: Verify container run
+        run: |
+          docker run -d -p 3000:3000 --env-file apps/reader/.env.local --name temp-flow-${{ matrix.arch }} flow:${{ matrix.arch }}
+          sleep 10
+          # 检查容器是否存活
+          if ! docker ps | grep temp-flow-${{ matrix.arch }}; then
+            echo "Container (${{ matrix.arch }}) failed to start, logs:"
+            docker logs temp-flow-${{ matrix.arch }}
+            exit 1
+          fi
+          docker stop temp-flow-${{ matrix.arch }} && docker rm temp-flow-${{ matrix.arch }}
+
+      # 导出镜像为压缩包（文件名带架构，避免覆盖）
+      - name: Export Docker image
+        run: |
+          docker save flow:${{ matrix.arch }} -o flow-image-${{ matrix.arch }}.tar
+
+      # 上传压缩包供下载（artifact名称带架构，区分不同架构产物）
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-docker-image-${{ matrix.arch }}
+          path: flow-image-${{ matrix.arch }}.tar
+          retention-days: 2
+          if-no-files-found: error
